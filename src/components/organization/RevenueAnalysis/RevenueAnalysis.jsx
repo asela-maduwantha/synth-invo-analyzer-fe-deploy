@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useMemo, useCallback } from 'react';
 import HTTPService from '../../../Service/HTTPService';
 import { Card, Typography, message, Row, Col, Select, Table, Switch, Button } from 'antd';
 import { Line } from 'react-chartjs-2';
@@ -18,29 +18,29 @@ const RevenueAnalysis = () => {
   const [selectedYear, setSelectedYear] = useState('All');
   const [availableYears, setAvailableYears] = useState([]);
 
-  useEffect(() => {
-    const fetchData = async () => {
-      try {
-        const params = { organization_id: localStorage.getItem('organization_id') };
-        const response = await HTTPService.get('analysis/monthly-expenditure/', { params });
-        setExpendituresData(response.data);
-        setFilteredData(response.data);
-        
-        // Extract years from the data for year select options
-        const years = response.data.map(entry => entry.month.split('-')[0]);
-        const uniqueYears = Array.from(new Set(years));
-        setAvailableYears(['All', ...uniqueYears]);
-        
-      } catch (error) {
-        console.error('Error fetching expenditures data:', error);
-        message.error('Failed to fetch expenditures data.');
-      }
-    };
-
-    fetchData();
+  const fetchData = useCallback(async () => {
+    try {
+      const params = { organization_id: localStorage.getItem('organization_id') };
+      const response = await HTTPService.get('analysis/monthly-expenditure/', { params });
+      const sortedData = response.data.sort((a, b) => a.month.localeCompare(b.month));
+      setExpendituresData(sortedData);
+      setFilteredData(sortedData);
+      
+      const years = sortedData.map(entry => entry.month.split('-')[0]);
+      const uniqueYears = Array.from(new Set(years)).sort((a, b) => b - a);
+      setAvailableYears(['All', ...uniqueYears]);
+      
+    } catch (error) {
+      console.error('Error fetching expenditures data:', error);
+      message.error('Failed to fetch expenditures data.');
+    }
   }, []);
 
-  const processChartData = (data) => {
+  useEffect(() => {
+    fetchData();
+  }, [fetchData]);
+
+  const processChartData = useCallback((data) => {
     const groupedData = data.reduce((acc, { month, total_expenditure }) => {
       const [year, monthNum] = month.split('-');
       if (!acc[year]) acc[year] = { label: year, data: Array(12).fill(0) };
@@ -60,7 +60,7 @@ const RevenueAnalysis = () => {
       labels: ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'],
       datasets
     };
-  };
+  }, []);
 
   const getRandomColor = () => {
     const colors = [
@@ -70,22 +70,22 @@ const RevenueAnalysis = () => {
     return colors[Math.floor(Math.random() * colors.length)];
   };
 
-  const chartData = processChartData(filteredData);
+  const chartData = useMemo(() => processChartData(filteredData), [filteredData, processChartData]);
 
   const columns = [
     {
       title: '#',
-      dataIndex: 'key',
-      key: 'key',
-      render: (text, record, index) => index + 1,
+      key: 'index',
+      render: (_, __, index) => index + 1,
     },
     {
       title: 'Month',
       dataIndex: 'month',
       key: 'month',
       render: (month) => {
+        const [year, monthNum] = month.split('-');
         const monthNames = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
-        return monthNames[parseInt(month.split('-')[1], 10) - 1];
+        return `${monthNames[parseInt(monthNum, 10) - 1]} ${year}`;
       }
     },
     {
@@ -96,23 +96,20 @@ const RevenueAnalysis = () => {
     },
   ];
 
-  const handleViewToggle = () => {
-    setViewMode(viewMode === 'graphical' ? 'tabular' : 'graphical');
-  };
+  const handleViewToggle = useCallback(() => {
+    setViewMode(prev => prev === 'graphical' ? 'tabular' : 'graphical');
+  }, []);
 
-  const handleYearChange = (value) => {
+  const handleYearChange = useCallback((value) => {
     setSelectedYear(value);
-    if (value === 'All') {
-      setFilteredData(expendituresData);
-    } else {
-      const filtered = expendituresData.filter(entry => entry.month.startsWith(value));
-      setFilteredData(filtered);
-    }
-  };
+    setFilteredData(value === 'All' 
+      ? expendituresData 
+      : expendituresData.filter(entry => entry.month.startsWith(value))
+    );
+  }, [expendituresData]);
 
-  const generatePDF = () => {
-    const doc = new jsPDF('landscape'); // Set initial orientation to landscape
-    const chartData = processChartData(filteredData);
+  const generatePDF = useCallback(() => {
+    const doc = new jsPDF('landscape');
     const canvas = document.createElement('canvas');
     const ctx = canvas.getContext('2d');
     canvas.width = 1500;
@@ -132,29 +129,17 @@ const RevenueAnalysis = () => {
           }
         },
         scales: {
-          x: {
-            ticks: {
-              font: {
-                size: 20
-              }
-            }
-          },
-          y: {
-            ticks: {
-              font: {
-                size: 20
-              }
-            }
-          }
+          x: { ticks: { font: { size: 20 } } },
+          y: { ticks: { font: { size: 20 } } }
         }
       }
     });
 
     setTimeout(() => {
       const chartImage = canvas.toDataURL('image/png', 1.0);
-      doc.addImage(chartImage, 'PNG', 10, 10, 270, 150); // Adjust dimensions for landscape
+      doc.addImage(chartImage, 'PNG', 10, 10, 270, 150);
 
-      doc.addPage('portrait'); // Add a new page in portrait mode
+      doc.addPage('portrait');
 
       const tableData = filteredData.map((item, index) => [
         index + 1,
@@ -166,12 +151,12 @@ const RevenueAnalysis = () => {
         head: [['#', 'Month', 'Total Expenditure']],
         body: tableData,
         startY: 10,
-        styles: { fontSize: 12 } // Adjust font size for table
+        styles: { fontSize: 12 }
       });
 
       doc.save('ExpenditureAnalysis.pdf');
-    }, 1000); // Timeout to allow the chart to render properly
-  };
+    }, 1000);
+  }, [chartData, filteredData]);
 
   return (
     <div style={{ padding: '20px', maxWidth: '800px', margin: '0 auto' }}>
@@ -195,7 +180,6 @@ const RevenueAnalysis = () => {
             unCheckedChildren="Table"
             checked={viewMode === 'graphical'}
             onChange={handleViewToggle}
-            disabled={selectedYear === 'All'}
           />
         </Col>
         <Col xs={24} md={8}>
@@ -219,32 +203,19 @@ const RevenueAnalysis = () => {
                     }
                   },
                   scales: {
-                    x: {
-                      ticks: {
-                        font: {
-                          size: 16
-                        }
-                      }
-                    },
-                    y: {
-                      ticks: {
-                        font: {
-                          size: 16
-                        }
-                      }
-                    }
+                    x: { ticks: { font: { size: 16 } } },
+                    y: { ticks: { font: { size: 16 } } }
                   }
                 }}
               />
             </div>
           ) : (
-            selectedYear !== 'All' && (
-              <Table
-                dataSource={filteredData.map((item, index) => ({ ...item, key: index }))}
-                columns={columns}
-                pagination={false}
-              />
-            )
+            <Table
+              dataSource={filteredData}
+              columns={columns}
+              pagination={false}
+              rowKey={(record, index) => `${record.month}-${index}`}
+            />
           )}
         </Card>
       )}

@@ -22,11 +22,7 @@ const SeasonalAnalysis = () => {
 
   const fetchSeasonalSales = useCallback(async () => {
     try {
-      const response = await HTTPService.get('analysis/get_seasonal_sales/', {
-        headers: {
-          'Cookie': 'csrftoken=eVzK5Xpc3Jak1adzWfVt96iZROVDZ70z',
-        },
-      });
+      const response = await HTTPService.get('analysis/get_seasonal_sales/');
       setSeasonalSalesData(response.data);
     } catch (error) {
       console.error('Error fetching seasonal sales data:', error);
@@ -34,56 +30,27 @@ const SeasonalAnalysis = () => {
   }, []);
 
   const prepareMonthlyChartData = useCallback(() => {
-    const labels = [];
-    const values = [];
-
-    Object.keys(monthlySalesData).forEach((dateStr) => {
-      const date = new Date(dateStr);
-      const monthName = date.toLocaleString('default', { month: 'short' });
-      labels.push(monthName);
-      values.push(monthlySalesData[dateStr]);
-    });
-
+    const sortedEntries = Object.entries(monthlySalesData).sort(([a], [b]) => new Date(a) - new Date(b));
+    const labels = sortedEntries.map(([dateStr]) => new Date(dateStr).toLocaleString('default', { month: 'short' }));
+    const values = sortedEntries.map(([, value]) => value);
     return { labels, values };
   }, [monthlySalesData]);
 
   const prepareSeasonalChartData = useCallback(() => {
     const labels = ['Mar', 'May', 'Jun'];
-    const values = [
-      seasonalSalesData['3'] || 0,
-      seasonalSalesData['5'] || 0,
-      seasonalSalesData['6'] || 0,
-    ];
-    const colors = 'rgb(75, 192, 192)';
-
-    return { labels, values, colors };
+    const values = labels.map(month => seasonalSalesData[month] || 0);
+    return { labels, values };
   }, [seasonalSalesData]);
 
-  const drawMonthlySalesChart = useCallback(() => {
-    const chartData = prepareMonthlyChartData();
-
-    const ctx = document.getElementById('monthlySalesChart');
+  const createChart = useCallback((ctx, type, data, options) => {
     if (ctx) {
-      monthlyChartRef.current = new Chart(ctx, {
-        type: 'line',
-        data: {
-          labels: chartData.labels,
-          datasets: [
-            {
-              label: 'Monthly Sales',
-              data: chartData.values,
-              fill: false,
-              borderColor: 'rgb(75, 192, 192)',
-              tension: 0.1,
-            },
-          ],
-        },
+      return new Chart(ctx, {
+        type,
+        data,
         options: {
           responsive: true,
           plugins: {
-            legend: {
-              position: 'top',
-            },
+            legend: { position: 'top' },
             tooltip: {
               callbacks: {
                 label: (tooltipItem) => `Sales: $${tooltipItem.raw.toFixed(2)}`,
@@ -91,75 +58,53 @@ const SeasonalAnalysis = () => {
             },
           },
           scales: {
-            x: {
-              title: {
-                display: true,
-                text: 'Month',
-              },
-            },
-            y: {
-              title: {
-                display: true,
-                text: 'Sales ($)',
-              },
-            },
-          },
-        },
-      });
-    }
-  }, [prepareMonthlyChartData]);
-
-  const drawSeasonalSalesChart = useCallback(() => {
-    const chartData = prepareSeasonalChartData();
-
-    const ctx = document.getElementById('seasonalSalesChart');
-    if (ctx) {
-      seasonalChartRef.current = new Chart(ctx, {
-        type: 'line',
-        data: {
-          labels: chartData.labels,
-          datasets: [
-            {
-              label: 'Seasonal Sales',
-              data: chartData.values,
-              fill: false,
-              borderColor: chartData.colors,
-              tension: 0.1,
-            },
-          ],
-        },
-        options: {
-          responsive: true,
-          plugins: {
-            legend: {
-              position: 'top',
-            },
-            tooltip: {
-              callbacks: {
-                label: (tooltipItem) =>
-                  `Sales: $${tooltipItem.raw.toFixed(2)}`,
-              },
-            },
-          },
-          scales: {
-            x: {
-              title: {
-                display: true,
-                text: 'Month',
-              },
-            },
-            y: {
-              title: {
-                display: true,
-                text: 'Sales ($)',
-              },
+            x: { title: { display: true, text: 'Month' } },
+            y: { 
+              title: { display: true, text: 'Sales ($)' },
               beginAtZero: true,
             },
           },
+          ...options,
         },
       });
     }
-  }, [prepareSeasonalChartData]);
+  }, []);
+
+  const drawMonthlySalesChart = useCallback(() => {
+    const { labels, values } = prepareMonthlyChartData();
+    const ctx = document.getElementById('monthlySalesChart');
+    if (monthlyChartRef.current) {
+      monthlyChartRef.current.destroy();
+    }
+    monthlyChartRef.current = createChart(ctx, 'line', {
+      labels,
+      datasets: [{
+        label: 'Monthly Sales',
+        data: values,
+        fill: false,
+        borderColor: 'rgb(75, 192, 192)',
+        tension: 0.1,
+      }],
+    });
+  }, [prepareMonthlyChartData, createChart]);
+
+  const drawSeasonalSalesChart = useCallback(() => {
+    const { labels, values } = prepareSeasonalChartData();
+    const ctx = document.getElementById('seasonalSalesChart');
+    if (seasonalChartRef.current) {
+      seasonalChartRef.current.destroy();
+    }
+    seasonalChartRef.current = createChart(ctx, 'line', {
+      labels,
+      datasets: [{
+        label: 'Seasonal Sales',
+        data: values,
+        fill: false,
+        borderColor: 'rgb(75, 192, 192)',
+        tension: 0.1,
+      }],
+    });
+  }, [prepareSeasonalChartData, createChart]);
 
   useEffect(() => {
     fetchMonthlySales();
@@ -167,35 +112,22 @@ const SeasonalAnalysis = () => {
   }, [fetchMonthlySales, fetchSeasonalSales]);
 
   useEffect(() => {
-    if (monthlyChartRef.current) {
-      monthlyChartRef.current.destroy();
-    }
-    if (seasonalChartRef.current) {
-      seasonalChartRef.current.destroy();
-    }
     drawMonthlySalesChart();
     drawSeasonalSalesChart();
-  }, [
-    monthlySalesData,
-    seasonalSalesData,
-    drawMonthlySalesChart,
-    drawSeasonalSalesChart,
-  ]);
+  }, [monthlySalesData, seasonalSalesData, drawMonthlySalesChart, drawSeasonalSalesChart]);
 
   return (
     <div>
-      <Card
-        style={{ width: 800, height: 500, marginBottom: '20px' }}
-      >
+      <Card style={{ width: 800, marginBottom: '20px' }}>
         <Meta title="Seasonal Analysis" />
-        <div>
+        <div style={{ height: 400 }}>
           <canvas id="seasonalSalesChart"></canvas>
         </div>
       </Card>
 
-      <Card style={{ width: 800, height: 500 }}>
+      <Card style={{ width: 800 }}>
         <Meta title="Monthly Sales Trends Chart" />
-        <div>
+        <div style={{ height: 400 }}>
           <canvas id="monthlySalesChart"></canvas>
         </div>
       </Card>

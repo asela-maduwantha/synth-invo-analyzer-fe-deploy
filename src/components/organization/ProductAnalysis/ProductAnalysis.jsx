@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useCallback, useMemo } from 'react';
 import HTTPService from '../../../Service/HTTPService';
 import { Card, Typography, message, Row, Col, Select, Table, Switch } from 'antd';
 import { Line } from 'react-chartjs-2';
@@ -19,60 +19,60 @@ const ProductAnalysis = () => {
     const [selectedProductCurrency, setSelectedProductCurrency] = useState(null);
     const organization_id = localStorage.getItem('organization_id');
 
-    useEffect(() => {
-        const fetchProducts = async () => {
-            try {
-                const response = await HTTPService.get('search/get-prod-by-org/', {
-                    params: { organization_id: organization_id }
-                });
-                setProducts(response.data);
-            } catch (error) {
-                console.error('Error fetching products:', error);
-                message.error('Failed to fetch product list.');
-            }
-        };
-
-        fetchProducts();
+    const fetchProducts = useCallback(async () => {
+        try {
+            const response = await HTTPService.get('search/get-prod-by-org/', {
+                params: { organization_id }
+            });
+            setProducts(response.data);
+        } catch (error) {
+            console.error('Error fetching products:', error);
+            message.error('Failed to fetch product list.');
+        }
     }, [organization_id]);
 
     useEffect(() => {
-        const fetchPriceDeviations = async () => {
-            if (selectedProduct && selectedYear) {
-                try {
-                    const response = await HTTPService.get('analysis/product_price_deviations/', {
-                        params: { year: selectedYear, product_name: selectedProduct, organization_id: organization_id }
-                    });
-                    setPriceDeviationData(response.data);
-                    message.success('Price deviation data fetched successfully.');
-                } catch (error) {
-                    console.error('Error fetching price deviation data:', error);
-                    setPriceDeviationData(null);
-                    message.error('Failed to fetch price deviation data.');
-                }
-            }
-        };
+        fetchProducts();
+    }, [fetchProducts]);
 
-        fetchPriceDeviations();
+    const fetchPriceDeviations = useCallback(async () => {
+        if (selectedProduct && selectedYear) {
+            try {
+                const response = await HTTPService.get('analysis/product_price_deviations/', {
+                    params: { year: selectedYear, product_name: selectedProduct, organization_id }
+                });
+                setPriceDeviationData(response.data);
+                message.success('Price deviation data fetched successfully.');
+            } catch (error) {
+                console.error('Error fetching price deviation data:', error);
+                setPriceDeviationData(null);
+                message.error('Failed to fetch price deviation data.');
+            }
+        }
     }, [selectedProduct, selectedYear, organization_id]);
 
-    const handleProductChange = (value) => {
+    useEffect(() => {
+        fetchPriceDeviations();
+    }, [fetchPriceDeviations]);
+
+    const handleProductChange = useCallback((value) => {
         const product = products.find(p => p.description === value);
         setSelectedProduct(value);
         setSelectedProductCurrency(product.currency);
         setAvailableYears(product.years);
+        setSelectedYear(null);
         setPriceDeviationData(null);
-    };
+    }, [products]);
 
-    const handleYearChange = (value) => {
+    const handleYearChange = useCallback((value) => {
         setSelectedYear(value);
         setPriceDeviationData(null);
-    };
+    }, []);
 
-    const lineData = {
-        labels: priceDeviationData ? priceDeviationData.map(item => {
-            const monthNames = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
-            return monthNames[item.month - 1];
-        }) : [],
+    const monthNames = useMemo(() => ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"], []);
+
+    const lineData = useMemo(() => ({
+        labels: priceDeviationData ? priceDeviationData.map(item => monthNames[item.month - 1]) : [],
         datasets: [
             {
                 label: `${selectedProduct} Price`,
@@ -91,23 +91,19 @@ const ProductAnalysis = () => {
                 tension: 0.1
             }
         ]
-    };
+    }), [priceDeviationData, selectedProduct, monthNames]);
 
-    const columns = [
+    const columns = useMemo(() => [
         {
             title: '#',
-            dataIndex: 'key',
-            key: 'key',
-            render: (text, record, index) => index + 1
+            key: 'index',
+            render: (_, __, index) => index + 1
         },
         {
             title: 'Month',
             dataIndex: 'month',
             key: 'month',
-            render: (month) => {
-                const monthNames = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
-                return monthNames[month - 1];
-            }
+            render: (month) => monthNames[month - 1]
         },
         {
             title: `${selectedProduct} Price (${selectedProductCurrency})`,
@@ -121,7 +117,7 @@ const ProductAnalysis = () => {
             key: 'overall_avg_price',
             render: (price) => price.toFixed(2)
         },
-    ];
+    ], [selectedProduct, selectedProductCurrency, monthNames]);
 
     return (
         <div style={{ padding: '20px', maxWidth: '800px', margin: '0 auto' }}>
@@ -132,6 +128,7 @@ const ProductAnalysis = () => {
                         style={{ width: '100%' }}
                         placeholder="Select a product"
                         onChange={handleProductChange}
+                        value={selectedProduct}
                     >
                         {products.map((product, index) => (
                             <Option key={index} value={product.description}>{product.description}</Option>
@@ -156,7 +153,7 @@ const ProductAnalysis = () => {
                         checkedChildren="Chart"
                         unCheckedChildren="Table"
                         checked={isChartView}
-                        onChange={() => setIsChartView(!isChartView)}
+                        onChange={() => setIsChartView(prev => !prev)}
                     />
                 </Col>
             </Row>
@@ -186,9 +183,10 @@ const ProductAnalysis = () => {
                         </div>
                     ) : (
                         <Table
-                            dataSource={priceDeviationData.map((item, index) => ({ ...item, key: index }))}
+                            dataSource={priceDeviationData}
                             columns={columns}
                             pagination={false}
+                            rowKey={(record, index) => `${record.month}-${index}`}
                         />
                     )}
                 </Card>

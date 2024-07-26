@@ -1,7 +1,10 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useCallback, useMemo } from 'react';
 import HTTPService from '../../../Service/HTTPService';
 import { Card, Typography, message, Row, Col, Select, Table, Switch } from 'antd';
 import { Pie } from 'react-chartjs-2';
+import { Chart as ChartJS, ArcElement, Tooltip, Legend } from 'chart.js';
+
+ChartJS.register(ArcElement, Tooltip, Legend);
 
 const { Title } = Typography;
 const { Option } = Select;
@@ -9,81 +12,74 @@ const { Option } = Select;
 const SupplierAnalysis = () => {
     const [suppliersExpenditures, setSuppliersExpenditures] = useState([]);
     const [selectedYear, setSelectedYear] = useState(new Date().getFullYear().toString());
-    const [chartData, setChartData] = useState(null);
+    const [isLoading, setIsLoading] = useState(false);
     const [viewMode, setViewMode] = useState('chart');
 
+    const organization_id = localStorage.getItem('organization_id');
+
+    const fetchSupplierExpenditures = useCallback(async () => {
+        if (!organization_id) {
+            message.error('Organization ID not found. Please log in again.');
+            return;
+        }
+
+        setIsLoading(true);
+        try {
+            const response = await HTTPService.get(`analysis/supplier-expenditures/`, {
+                params: { organization_id, year: selectedYear }
+            });
+
+            const suppliersData = response.data;
+            const totalAmountAll = suppliersData.reduce((acc, supplier) => acc + supplier.total_amount, 0);
+
+            const suppliersWithPercentage = suppliersData.map(supplier => ({
+                ...supplier,
+                percentage: ((supplier.total_amount / totalAmountAll) * 100).toFixed(2)
+            }));
+
+            setSuppliersExpenditures(suppliersWithPercentage);
+        } catch (error) {
+            console.error('Error fetching supplier expenditures:', error.message);
+            message.error('Failed to fetch supplier expenditures.');
+        } finally {
+            setIsLoading(false);
+        }
+    }, [organization_id, selectedYear]);
+
     useEffect(() => {
-        const fetchSupplierExpenditures = async () => {
-            try {
-                const organization_id = localStorage.getItem('organization_id');
-                if (!organization_id) {
-                    throw new Error('Organization ID not found in localStorage');
-                }
-    
-                const response = await HTTPService.get(`analysis/supplier-expenditures/`, {
-                    params: { organization_id, year: selectedYear }
-                });
-    
-                const suppliersData = response.data;
-    
-                // Calculate total amount across all suppliers
-                const totalAmountAll = suppliersData.reduce((acc, supplier) => acc + supplier.total_amount, 0);
-    
-                // Calculate percentage for each supplier
-                const suppliersWithPercentage = suppliersData.map(supplier => ({
-                    ...supplier,
-                    percentage: ((supplier.total_amount / totalAmountAll) * 100).toFixed(2)
-                }));
-    
-                // Prepare data for Chart.js
-                const labels = suppliersWithPercentage.map(supplier => supplier.supplier_name);
-                const data = suppliersWithPercentage.map(supplier => supplier.total_amount);
-    
-                const chartData = {
-                    labels: labels,
-                    datasets: [
-                        {
-                            label: 'Supplier Expenditures',
-                            data: data,
-                            backgroundColor: [
-                                '#FF6384',
-                                '#36A2EB',
-                                '#FFCE56',
-                                '#8E5EA2',
-                                '#FF7F50',
-                                '#20B2AA',
-                                '#87CEEB',
-                            ],
-                        },
-                    ],
-                };
-    
-                setSuppliersExpenditures(suppliersWithPercentage);
-                setChartData(chartData);
-            } catch (error) {
-                console.error('Error fetching supplier expenditures:', error.message);
-                message.error('Failed to fetch supplier expenditures.');
-            }
-        };
-
         fetchSupplierExpenditures();
-    }, [selectedYear]);
+    }, [fetchSupplierExpenditures]);
 
-    const handleYearChange = (value) => {
+    const handleYearChange = useCallback((value) => {
         setSelectedYear(value);
-        setChartData(null); // Clear chart data when year changes to indicate loading
-    };
+    }, []);
 
-    const handleViewModeChange = (mode) => {
-        setViewMode(mode);
-    };
+    const chartData = useMemo(() => {
+        if (!suppliersExpenditures.length) return null;
 
-    const columns = [
+        const labels = suppliersExpenditures.map(supplier => supplier.supplier_name);
+        const data = suppliersExpenditures.map(supplier => supplier.total_amount);
+
+        return {
+            labels: labels,
+            datasets: [
+                {
+                    label: 'Supplier Expenditures',
+                    data: data,
+                    backgroundColor: [
+                        '#FF6384', '#36A2EB', '#FFCE56', '#8E5EA2', '#FF7F50', '#20B2AA', '#87CEEB',
+                        // Add more colors if needed
+                    ],
+                },
+            ],
+        };
+    }, [suppliersExpenditures]);
+
+    const columns = useMemo(() => [
         {
             title: '#',
-            dataIndex: 'index',
             key: 'index',
-            render: (text, record, index) => index + 1
+            render: (_, __, index) => index + 1
         },
         {
             title: 'Supplier Name',
@@ -95,14 +91,21 @@ const SupplierAnalysis = () => {
             dataIndex: 'total_amount',
             key: 'total_amount',
             render: (amount) => `$${amount.toFixed(2)}`,
+            sorter: (a, b) => a.total_amount - b.total_amount,
         },
         {
             title: 'Percentage',
             dataIndex: 'percentage',
             key: 'percentage',
             render: (percentage) => `${percentage}%`,
+            sorter: (a, b) => parseFloat(a.percentage) - parseFloat(b.percentage),
         },
-    ];
+    ], []);
+
+    const years = useMemo(() => {
+        const currentYear = new Date().getFullYear();
+        return Array.from({ length: 5 }, (_, i) => currentYear - i);
+    }, []);
 
     return (
         <div style={{ padding: '20px', maxWidth: '800px', margin: '0 auto' }}>
@@ -113,9 +116,9 @@ const SupplierAnalysis = () => {
                         style={{ width: '100%' }}
                         placeholder="Select a year"
                         onChange={handleYearChange}
-                        defaultValue={selectedYear}
+                        value={selectedYear}
                     >
-                        {[2021, 2022, 2023, 2024].map(year => (
+                        {years.map(year => (
                             <Option key={year} value={year.toString()}>{year}</Option>
                         ))}
                     </Select>
@@ -125,31 +128,52 @@ const SupplierAnalysis = () => {
                         checkedChildren="Chart"
                         unCheckedChildren="Table"
                         checked={viewMode === 'chart'}
-                        onChange={(checked) => handleViewModeChange(checked ? 'chart' : 'table')}
+                        onChange={(checked) => setViewMode(checked ? 'chart' : 'table')}
                     />
                 </Col>
             </Row>
 
-            {viewMode === 'chart' && chartData && (
-                <Card title="Supplier Expenditures Chart" style={{ marginTop: '20px' }}>
+            <Card 
+                title={`Supplier Expenditures ${viewMode === 'chart' ? 'Chart' : 'Table'}`} 
+                style={{ marginTop: '20px' }}
+                loading={isLoading}
+            >
+                {viewMode === 'chart' && chartData && (
                     <div style={{ height: '400px' }}>
-                        <Pie data={chartData} />
+                        <Pie 
+                            data={chartData} 
+                            options={{
+                                responsive: true,
+                                maintainAspectRatio: false,
+                                plugins: {
+                                    legend: {
+                                        position: 'right',
+                                    },
+                                    tooltip: {
+                                        callbacks: {
+                                            label: (context) => {
+                                                const label = context.label || '';
+                                                const value = context.raw || 0;
+                                                const percentage = suppliersExpenditures[context.dataIndex].percentage;
+                                                return `${label}: $${value.toFixed(2)} (${percentage}%)`;
+                                            }
+                                        }
+                                    }
+                                }
+                            }}
+                        />
                     </div>
-                </Card>
-            )}
+                )}
 
-            {viewMode === 'table' && (
-                <Card title="Supplier Expenditures Table" style={{ marginTop: '20px' }}>
+                {viewMode === 'table' && (
                     <Table
-                        dataSource={suppliersExpenditures.map((supplier, index) => ({
-                            ...supplier,
-                            index,
-                        }))}
+                        dataSource={suppliersExpenditures}
                         columns={columns}
                         pagination={false}
+                        rowKey="supplier_name"
                     />
-                </Card>
-            )}
+                )}
+            </Card>
         </div>
     );
 };
