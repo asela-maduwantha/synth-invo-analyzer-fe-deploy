@@ -67,7 +67,7 @@ const StyledForm = styled(Form)`
 const SigninButton = styled(Button)`
   height: 48px;
   font-size: 16px;
-  background-color: #ffffff;
+  background-color: #1890ff;
   border-color: #1890ff;
 
   &:hover, &:focus {
