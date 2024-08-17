@@ -1,18 +1,23 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import HTTPService from '../../../Service/HTTPService';
-import { Card, Typography, message, Row, Col, Select, Table } from 'antd';
+import { Card, Typography, message, Row, Col, Select, Table, Switch } from 'antd';
 import { Line } from 'react-chartjs-2';
 
 const { Title } = Typography;
 const { Option } = Select;
 
+const months = [
+  'January', 'February', 'March', 'April', 'May', 'June',
+  'July', 'August', 'September', 'October', 'November', 'December'
+];
+
 const SupplierCompare = () => {
   const [products, setProducts] = useState([]);
   const [selectedProduct, setSelectedProduct] = useState(null);
   const [selectedYear, setSelectedYear] = useState(null);
-  const [selectedSuppliers, setSelectedSuppliers] = useState([]);
   const [priceData, setPriceData] = useState([]);
   const [selectedProductCurrency, setSelectedProductCurrency] = useState(null);
+  const [isChartView, setIsChartView] = useState(true); // true for chart, false for table
   const organization_id = localStorage.getItem('organization_id');
 
   const fetchProducts = useCallback(async () => {
@@ -21,6 +26,12 @@ const SupplierCompare = () => {
         params: { organization_id: organization_id }
       });
       setProducts(response.data);
+      if (response.data.length > 0) {
+        const defaultProduct = response.data[0];
+        setSelectedProduct(defaultProduct.description);
+        setSelectedProductCurrency(defaultProduct.currency);
+        setSelectedYear(defaultProduct.years[0]);
+      }
     } catch (error) {
       console.error('Error fetching products:', error);
       message.error('Failed to fetch product list.');
@@ -34,17 +45,16 @@ const SupplierCompare = () => {
           year: selectedYear,
           product_name: selectedProduct,
           organization_id: organization_id,
-          suppliers: selectedSuppliers
         }
       });
       setPriceData(response.data);
-      message.success('Invoice data fetched successfully.');
+      message.success('Price data fetched successfully.');
     } catch (error) {
-      console.error('Error fetching invoice data:', error);
+      console.error('Error fetching price data:', error);
       setPriceData([]);
-      message.error('Failed to fetch invoice data.');
+      message.error('Failed to fetch price data.');
     }
-  }, [organization_id, selectedProduct, selectedYear, selectedSuppliers]);
+  }, [organization_id, selectedProduct, selectedYear]);
 
   useEffect(() => {
     fetchProducts();
@@ -54,7 +64,7 @@ const SupplierCompare = () => {
     if (selectedProduct && selectedYear) {
       fetchPriceData();
     }
-  }, [selectedProduct, selectedYear, selectedSuppliers, fetchPriceData]);
+  }, [selectedProduct, selectedYear, fetchPriceData]);
 
   const handleProductChange = (value) => {
     const product = products.find(p => p.description === value);
@@ -62,7 +72,6 @@ const SupplierCompare = () => {
     setSelectedProductCurrency(product.currency);
     setSelectedYear(product.years[0]);
     setPriceData([]);
-    setSelectedSuppliers([]);
   };
 
   const handleYearChange = (value) => {
@@ -70,45 +79,28 @@ const SupplierCompare = () => {
     setPriceData([]);
   };
 
-  const handleSupplierChange = (value) => {
-    setSelectedSuppliers(value);
+  const getRandomColor = (index) => {
+    const colors = ['#FF5733', '#33FF57', '#3357FF', '#F333FF', '#FF33A8', '#FF8333'];
+    return colors[index % colors.length];
   };
 
-  const getRandomColor = () => {
-    const letters = '0123456789ABCDEF';
-    let color = '#';
-    for (let i = 0; i < 6; i++) {
-      color += letters[Math.floor(Math.random() * 16)];
-    }
-    return color;
+  const prepareChartData = () => {
+    const labels = months;
+    const datasets = priceData.map((supplierData, index) => {
+      const data = labels.map((_, i) => supplierData.monthly_prices[i + 1] || 0);
+      return {
+        label: supplierData.supplier,
+        data,
+        borderColor: getRandomColor(index),
+        backgroundColor: 'rgba(75, 192, 192, 0.2)',
+        fill: false,
+      };
+    });
+
+    return { labels, datasets };
   };
 
-  const lineData = {
-    labels: ['Average Price'],
-    datasets: priceData.map(item => ({
-      label: item.supplier,
-      data: [item.avg_price],
-      borderColor: getRandomColor(),
-      backgroundColor: 'rgba(75, 192, 192, 0.2)',
-      fill: false,
-    }))
-  };
-
-  const columns = [
-    {
-      title: 'Supplier',
-      dataIndex: 'supplier',
-      key: 'supplier',
-    },
-    {
-      title: 'Average Price',
-      dataIndex: 'avg_price',
-      key: 'avg_price',
-      render: (price) => price.toFixed(2)
-    }
-  ];
-
-  const availableSuppliers = [...new Set(priceData.map(item => item.supplier))];
+  const lineData = prepareChartData();
 
   return (
     <div style={{ padding: '20px', maxWidth: '800px', margin: '0 auto' }}>
@@ -119,6 +111,7 @@ const SupplierCompare = () => {
             style={{ width: '100%' }}
             placeholder="Select a product"
             onChange={handleProductChange}
+            value={selectedProduct}
           >
             {products.map((product, index) => (
               <Option key={index} value={product.description}>{product.description}</Option>
@@ -138,19 +131,13 @@ const SupplierCompare = () => {
             ))}
           </Select>
         </Col>
-        <Col xs={24} md={8}>
-          <Select
-            mode="multiple"
-            style={{ width: '100%' }}
-            placeholder="Select suppliers"
-            onChange={handleSupplierChange}
-            value={selectedSuppliers}
-            disabled={!selectedProduct || !selectedYear}
-          >
-            {availableSuppliers.map((supplier, index) => (
-              <Option key={index} value={supplier}>{supplier}</Option>
-            ))}
-          </Select>
+        <Col xs={24} md={8} style={{ textAlign: 'right' }}>
+          <Switch
+            checkedChildren="Chart"
+            unCheckedChildren="Table"
+            checked={isChartView}
+            onChange={() => setIsChartView(prev => !prev)}
+          />
         </Col>
       </Row>
       {selectedProduct && selectedProductCurrency && (
@@ -158,8 +145,8 @@ const SupplierCompare = () => {
           <strong>Currency:</strong> {selectedProductCurrency}
         </div>
       )}
-      {priceData.length > 0 && (
-        <Card title="Invoice Data Analysis" style={{ marginTop: '20px' }}>
+      {priceData.length > 0 && isChartView && (
+        <Card title="Price Data Analysis" style={{ marginTop: '20px' }}>
           <div style={{ height: '400px' }}>
             <Line
               data={lineData}
@@ -170,10 +157,16 @@ const SupplierCompare = () => {
                   legend: { position: 'top' },
                   title: {
                     display: true,
-                    text: 'Average Price by Supplier'
+                    text: 'Average Price by Month and Supplier'
                   }
                 },
                 scales: {
+                  x: {
+                    title: {
+                      display: true,
+                      text: 'Month'
+                    }
+                  },
                   y: {
                     beginAtZero: true,
                     title: {
@@ -185,9 +178,44 @@ const SupplierCompare = () => {
               }}
             />
           </div>
+        </Card>
+      )}
+      {priceData.length > 0 && !isChartView && (
+        <Card title="Price Data Analysis" style={{ marginTop: '20px' }}>
           <Table
-            dataSource={priceData}
-            columns={columns}
+            dataSource={priceData.flatMap((supplier, index) => 
+              Object.keys(supplier.monthly_prices)
+                .filter(month => supplier.monthly_prices[month] !== 0)
+                .map((month, rowIndex) => ({
+                  key: `${index}-${rowIndex}`,
+                  supplier: supplier.supplier,
+                  month: months[parseInt(month) - 1],
+                  price: supplier.monthly_prices[month]
+                }))
+            )}
+            columns={[
+              {
+                title: '#',
+                key: 'rowNumber',
+                render: (text, record, index) => index + 1,
+              },
+              {
+                title: 'Supplier',
+                dataIndex: 'supplier',
+                key: 'supplier',
+              },
+              {
+                title: 'Month',
+                dataIndex: 'month',
+                key: 'month',
+              },
+              {
+                title: 'Price',
+                dataIndex: 'price',
+                key: 'price',
+                render: (price) => price.toFixed(2)
+              }
+            ]}
             pagination={false}
           />
         </Card>
